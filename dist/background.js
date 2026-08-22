@@ -232941,6 +232941,7 @@ function tracing() {
 const test = _baseTest.extend(playwrightFixtures);
 browserExports$2.debug;
 let jobRunning = false;
+let stopRequested = false;
 chrome.runtime.onMessage.addListener(
   (message, sender, sendResponse) => {
     if ((message == null ? void 0 : message.target) !== "background") {
@@ -232969,13 +232970,15 @@ chrome.runtime.onMessage.addListener(
         return;
       }
       jobRunning = true;
+      stopRequested = false;
       sendResponse({
         ok: true
       });
       runDownloadJob({
         tabId: message.tabId,
         endPage: Number(message.endPage),
-        caseName: message.caseName
+        caseName: message.caseName,
+        mode: message.mode
       }).catch(async (error2) => {
         console.error(
           "Ancestry download failed:",
@@ -232990,6 +232993,20 @@ chrome.runtime.onMessage.addListener(
         });
       }).finally(() => {
         jobRunning = false;
+      });
+      return;
+    }
+    if (message.type === "STOP_JOB") {
+      if (!jobRunning) {
+        sendResponse({
+          ok: false,
+          error: "No download job is running."
+        });
+        return;
+      }
+      stopRequested = true;
+      sendResponse({
+        ok: true
       });
       return;
     }
@@ -233020,8 +233037,10 @@ async function readPageNumber(tabId) {
 async function runDownloadJob({
   tabId,
   endPage,
-  caseName
+  caseName,
+  mode
 }) {
+  const buildsPdf = mode !== "separate";
   const safeCaseName = sanitizeFilename(caseName);
   await setStatus({
     state: "starting"
@@ -233029,14 +233048,16 @@ async function runDownloadJob({
   await chrome.action.setBadgeText({
     text: "..."
   });
-  await ensureOffscreenDocument();
-  const resetResponse = await sendToOffscreen({
-    type: "RESET"
-  });
-  if (!(resetResponse == null ? void 0 : resetResponse.ok)) {
-    throw new Error(
-      (resetResponse == null ? void 0 : resetResponse.error) || "Could not initialize PDF builder."
-    );
+  if (buildsPdf) {
+    await ensureOffscreenDocument();
+    const resetResponse = await sendToOffscreen({
+      type: "RESET"
+    });
+    if (!(resetResponse == null ? void 0 : resetResponse.ok)) {
+      throw new Error(
+        (resetResponse == null ? void 0 : resetResponse.error) || "Could not initialize PDF builder."
+      );
+    }
   }
   const crxApp = await crx.start({
     slowMo: 100
@@ -233077,7 +233098,14 @@ async function runDownloadJob({
         `Ending image ${endPage} is before starting image ${startPage}.`
       );
     }
+    let stoppedEarly = false;
+    let embeddedCount = 0;
+    let lastImageNumber = null;
     for (let imageNumber = startPage; imageNumber <= endPage; imageNumber++) {
+      if (stopRequested) {
+        stoppedEarly = true;
+        break;
+      }
       const currentValue = Number(
         await pageNumberInput.inputValue()
       );
@@ -233140,53 +233168,39 @@ async function runDownloadJob({
           `No image URL was available for image ${imageNumber}.`
         );
       }
-      const addResponse = await sendToOffscreen({
-        type: "ADD_IMAGE",
-        pageNumber: imageNumber,
-        filename: finishedDownload.filename,
-        url: imageUrl
-      });
-      if (!(addResponse == null ? void 0 : addResponse.ok)) {
-        throw new Error(
-          (addResponse == null ? void 0 : addResponse.error) || `Could not add image ${imageNumber} to the PDF.`
+      if (buildsPdf) {
+        const addResponse = await sendToOffscreen({
+          type: "ADD_IMAGE",
+          pageNumber: imageNumber,
+          filename: finishedDownload.filename,
+          url: imageUrl
+        });
+        if (!(addResponse == null ? void 0 : addResponse.ok)) {
+          throw new Error(
+            (addResponse == null ? void 0 : addResponse.error) || `Could not add image ${imageNumber} to the PDF.`
+          );
+        }
+        embeddedCount++;
+        console.log(
+          `Added image ${imageNumber} to PDF.`
         );
       }
-      console.log(
-        `Added image ${imageNumber} to PDF.`
-      );
-      if (chromeDownload) {
-        await waitForChromeDownloadComplete(
-          chromeDownload.id,
-          12e4
-        );
-        await sendToOffscreen({
-          type: "REVOKE_URL",
-          url: addResponse.blobUrl
-        });
-      } else {
-        console.warn(
-          "Chrome did not report a normal download; saving a fallback copy."
-        );
-        const padded = String(imageNumber).padStart(4, "0");
-        const fallbackFilename = `Ancestry Pages/${safeCaseName}/${padded}.${addResponse.extension}`;
-        const fallbackDownloadId = await chrome.downloads.download({
-          url: addResponse.blobUrl,
-          filename: fallbackFilename,
-          saveAs: false,
-          conflictAction: "overwrite"
-        });
-        await waitForChromeDownloadComplete(
-          fallbackDownloadId,
-          12e4
-        );
-        await sendToOffscreen({
-          type: "REVOKE_URL",
-          url: addResponse.blobUrl
-        });
+      if (mode === "combine") {
+        try {
+          await chrome.downloads.removeFile(
+            chromeDownload.id
+          );
+        } catch (error2) {
+          console.warn(
+            `Could not remove intermediate JPG for image ${imageNumber}:`,
+            error2
+          );
+        }
       }
       console.log(
         `Finished image ${imageNumber}.`
       );
+      lastImageNumber = imageNumber;
       if (imageNumber === endPage) {
         break;
       }
@@ -233201,51 +233215,56 @@ async function runDownloadJob({
         }
       );
     }
-    await setStatus({
-      state: "running",
-      start: startPage,
-      end: endPage,
-      current: endPage,
-      message: "Building PDF..."
-    });
-    await chrome.action.setBadgeText({
-      text: "PDF"
-    });
-    const finalResponse = await sendToOffscreen({
-      type: "FINALIZE"
-    });
-    if (!(finalResponse == null ? void 0 : finalResponse.ok)) {
-      throw new Error(
-        (finalResponse == null ? void 0 : finalResponse.error) || "Could not create the PDF."
+    let pdfName;
+    if (buildsPdf && embeddedCount > 0) {
+      const lastPageInPdf = stoppedEarly ? lastImageNumber : endPage;
+      await setStatus({
+        state: "running",
+        start: startPage,
+        end: endPage,
+        current: lastPageInPdf,
+        message: "Building PDF..."
+      });
+      await chrome.action.setBadgeText({
+        text: "PDF"
+      });
+      const finalResponse = await sendToOffscreen({
+        type: "FINALIZE"
+      });
+      if (!(finalResponse == null ? void 0 : finalResponse.ok)) {
+        throw new Error(
+          (finalResponse == null ? void 0 : finalResponse.error) || "Could not create the PDF."
+        );
+      }
+      pdfName = `${safeCaseName}_${startPage}-${lastPageInPdf}.pdf`;
+      const pdfDownloadId = await chrome.downloads.download({
+        url: finalResponse.blobUrl,
+        filename: pdfName,
+        saveAs: false,
+        conflictAction: "overwrite"
+      });
+      await waitForChromeDownloadComplete(
+        pdfDownloadId,
+        18e4
       );
+      await sendToOffscreen({
+        type: "REVOKE_URL",
+        url: finalResponse.blobUrl
+      });
     }
-    const pdfName = `${safeCaseName}_${startPage}-${endPage}.pdf`;
-    const pdfDownloadId = await chrome.downloads.download({
-      url: finalResponse.blobUrl,
-      filename: pdfName,
-      saveAs: false,
-      conflictAction: "overwrite"
-    });
-    await waitForChromeDownloadComplete(
-      pdfDownloadId,
-      18e4
-    );
-    await sendToOffscreen({
-      type: "REVOKE_URL",
-      url: finalResponse.blobUrl
-    });
     await setStatus({
-      state: "done",
+      state: stoppedEarly ? "stopped" : "done",
       start: startPage,
       end: endPage,
+      current: stoppedEarly ? lastImageNumber : endPage,
       pdfName,
       caseName: safeCaseName
     });
     await chrome.action.setBadgeText({
-      text: "OK"
+      text: stoppedEarly ? "STOP" : "OK"
     });
     console.log(
-      `Done: ${pdfName}`
+      stoppedEarly ? pdfName ? `Stopped: ${pdfName}` : `Stopped at image ${lastImageNumber}` : pdfName ? `Done: ${pdfName}` : `Done: images ${startPage}-${endPage}`
     );
   } finally {
     if (page) {

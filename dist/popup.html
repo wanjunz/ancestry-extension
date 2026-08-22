@@ -57,6 +57,28 @@
     .success {
       font-weight: bold;
     }
+    .startButton {
+      background-color: #B0B940;
+      margin: 4px 0;
+      color: #fff;
+    }
+    .startButton:hover {
+      background-color: #82892D;
+    }
+
+    .stopButton {
+      margin-top: 14px;
+      background-color: #9E9E9E;
+      color: #fff;
+      
+    }
+
+    .stopButton:hover:not(:disabled) {
+      background-color: #C0392B;
+    }
+    .stopButton:not(:disabled) {
+      background-color: #922B21;
+    }
   </style>
 </head>
 
@@ -69,7 +91,7 @@
   </div>
 
   <div class="field">
-    <label for="caseName">Case name</label>
+    <label for="caseName">File name</label>
     <input
       id="caseName"
       type="text"
@@ -78,7 +100,7 @@
   </div>
 
   <div class="field">
-    <label for="endPage">Last image</label>
+    <label for="endPage">Last page #</label>
     <input
       id="endPage"
       type="number"
@@ -86,9 +108,22 @@
       placeholder="263"
     >
   </div>
-
-  <button id="startButton" disabled>
-    Download and create PDF
+  
+  <!-- Only downloads separate JPGS -->
+  <button class = "startButton" id="separate" disabled>
+    Download imgs separately
+  </button>
+  <!-- Only outputs one PDF with all imgs -->
+  <button class = "startButton" id="combine" disabled>
+    Download one PDF with all imgs
+  </button>
+  <!-- Download JPGs and combines into one PDF -->
+  <button class = "startButton" id="separateNcombine" disabled>
+    Download imgs separately AND combine into PDF
+  </button>
+  <!-- Cancels the in-progress job; PDF modes still return a partial PDF -->
+  <button class = "stopButton" id="stop" disabled>
+    STOP
   </button>
 
   <div id="status"></div>

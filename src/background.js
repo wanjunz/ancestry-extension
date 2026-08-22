@@ -33,6 +33,13 @@ import {
  */
 let jobRunning = false;
 
+/*
+ * Set by STOP_JOB while a job is running. The main loop in
+ * runDownloadJob() checks this once per iteration (between pages,
+ * not mid-download) and breaks out early if it's true.
+ */
+let stopRequested = false;
+
 chrome.runtime.onMessage.addListener(
   (message, sender, sendResponse) => {
 
@@ -72,6 +79,7 @@ chrome.runtime.onMessage.addListener(
       }
 
       jobRunning = true;
+      stopRequested = false;
 
       /*
        * Acknowledge immediately that the job started - the popup
@@ -110,6 +118,26 @@ chrome.runtime.onMessage.addListener(
         .finally(() => {
           jobRunning = false;
         });
+
+      return;
+    }
+
+    if (message.type === "STOP_JOB") {
+
+      if (!jobRunning) {
+        sendResponse({
+          ok: false,
+          error: "No download job is running."
+        });
+
+        return;
+      }
+
+      stopRequested = true;
+
+      sendResponse({
+        ok: true
+      });
 
       return;
     }
@@ -257,11 +285,20 @@ async function runDownloadJob({
       );
     }
 
+    let stoppedEarly = false;
+    let embeddedCount = 0;
+    let lastImageNumber = null;
+
     for (
       let imageNumber = startPage;
       imageNumber <= endPage;
       imageNumber++
     ) {
+
+      if (stopRequested) {
+        stoppedEarly = true;
+        break;
+      }
 
       const currentValue =
         Number(
@@ -399,6 +436,8 @@ async function runDownloadJob({
             );
           }
 
+          embeddedCount++;
+
           console.log(
             `Added image ${imageNumber} to PDF.`
           );
@@ -437,6 +476,8 @@ async function runDownloadJob({
         `Finished image ${imageNumber}.`
       );
 
+      lastImageNumber = imageNumber;
+
       /*
        * Stop here on the final image.
        */
@@ -465,16 +506,24 @@ async function runDownloadJob({
 
     let pdfName;
 
-    if (buildsPdf) {
+    /*
+     * If STOP was pressed before any page was embedded, there's no
+     * partial PDF to build - skip straight to reporting "stopped".
+     */
+    if (buildsPdf && embeddedCount > 0) {
 
       /*
-       * Build the final PDF.
+       * Build the final PDF. If stoppedEarly, this only contains
+       * the pages that were embedded before the stop request.
        */
+      const lastPageInPdf =
+        stoppedEarly ? lastImageNumber : endPage;
+
       await setStatus({
         state: "running",
         start: startPage,
         end: endPage,
-        current: endPage,
+        current: lastPageInPdf,
         message: "Building PDF..."
       });
 
@@ -495,7 +544,7 @@ async function runDownloadJob({
       }
 
       pdfName =
-        `${safeCaseName}_${startPage}-${endPage}.pdf`;
+        `${safeCaseName}_${startPage}-${lastPageInPdf}.pdf`;
 
       const pdfDownloadId =
         await chrome.downloads.download({
@@ -517,21 +566,26 @@ async function runDownloadJob({
     }
 
     await setStatus({
-      state: "done",
+      state: stoppedEarly ? "stopped" : "done",
       start: startPage,
       end: endPage,
+      current: stoppedEarly ? lastImageNumber : endPage,
       pdfName,
       caseName: safeCaseName
     });
 
     await chrome.action.setBadgeText({
-      text: "OK"
+      text: stoppedEarly ? "STOP" : "OK"
     });
 
     console.log(
-      pdfName ?
-        `Done: ${pdfName}` :
-        `Done: images ${startPage}-${endPage}`
+      stoppedEarly ?
+        (pdfName ?
+          `Stopped: ${pdfName}` :
+          `Stopped at image ${lastImageNumber}`) :
+        (pdfName ?
+          `Done: ${pdfName}` :
+          `Done: images ${startPage}-${endPage}`)
     );
 
   } finally {

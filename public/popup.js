@@ -5,6 +5,7 @@ const statusEl = document.getElementById("status");
 const separate = document.getElementById("separate");
 const separateNcombine = document.getElementById("separateNcombine");
 const combine = document.getElementById("combine");
+const stop = document.getElementById("stop");
 
 let activeTabId = null;
 let startPage = null;
@@ -85,10 +86,28 @@ async function refreshStatus() {
   }
 
   if (ancestryJob.state === "done") {
+    setButtonsDisabled(false);
     statusEl.className = "success";
     statusEl.textContent = ancestryJob.pdfName
       ? `Finished. Created ${ancestryJob.pdfName}`
       : `Finished downloading images ${ancestryJob.start}-${ancestryJob.end}.`;
+    return;
+  }
+
+  if (ancestryJob.state === "stopped") {
+    setButtonsDisabled(false);
+    statusEl.className = "";
+
+    if (ancestryJob.current == null) {
+      statusEl.textContent = "Stopped by user before any pages were downloaded.";
+    } else if (ancestryJob.pdfName) {
+      statusEl.textContent =
+        `Stopped by user at page ${ancestryJob.current}. ` +
+        `PDF saved with pages up to ${ancestryJob.current} (${ancestryJob.pdfName}).`;
+    } else {
+      statusEl.textContent = `Stopped by user at page ${ancestryJob.current}.`;
+    }
+
     return;
   }
 
@@ -102,6 +121,7 @@ function setButtonsDisabled(disabled) {
   separate.disabled = disabled;
   combine.disabled = disabled;
   separateNcombine.disabled = disabled;
+  stop.disabled = !disabled;
 }
 
 async function startJob(mode) {
@@ -145,9 +165,25 @@ async function startJob(mode) {
   }
 }
 
+async function stopJob() {
+  stop.disabled = true;
+
+  const response = await chrome.runtime.sendMessage({
+    target: "background",
+    type: "STOP_JOB"
+  });
+
+  if (!response?.ok) {
+    showError(
+      response?.error || "Could not communicate within extension components."
+    );
+  }
+}
+
 separate.addEventListener("click", () => startJob("separate"));
 combine.addEventListener("click", () => startJob("combine"));
 separateNcombine.addEventListener("click", () => startJob("both"));
+stop.addEventListener("click", () => stopJob());
 
 readCurrentPage();
 refreshStatus();
