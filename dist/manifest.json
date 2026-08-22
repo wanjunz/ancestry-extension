@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Ancestry Case Downloader",
+  "version": "0.3.0",
+  "description": "Download a range of Ancestry case-file images and combine them into a PDF.",
+  "minimum_chrome_version": "118",
+
+  "permissions": [
+    "debugger",
+    "tabs",
+    "downloads",
+    "offscreen",
+    "storage"
+  ],
+
+  "host_permissions": [
+    "https://*/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "action": {
+    "default_title": "Ancestry Case Downloader",
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "ancestry-case-downloader",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "vite build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "playwright-crx": "^0.15.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "rollup-plugin-sourcemaps": "^0.6.3",
+    "vite": "6.1.0"
+  }
+}

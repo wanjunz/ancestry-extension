@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Ancestry Case Downloader",
+  "version": "0.1.0",
+  "description": "Download a selected range of Ancestry case-file images.",
+  "permissions": [
+    "activeTab",
+    "debugger",
+    "downloads"
+  ],
+  "action": {
+    "default_title": "Ancestry Case Downloader",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
