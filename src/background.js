@@ -51,7 +51,8 @@ chrome.runtime.onMessage.addListener(
       runDownloadJob({
         tabId: message.tabId,
         endPage: Number(message.endPage),
-        caseName: message.caseName
+        caseName: message.caseName,
+        mode: message.mode
       })
         .catch(async error => {
 
@@ -118,8 +119,11 @@ async function readPageNumber(tabId) {
 async function runDownloadJob({
   tabId,
   endPage,
-  caseName
+  caseName,
+  mode
 }) {
+
+  const buildsPdf = mode !== "separate";
 
   const safeCaseName =
     sanitizeFilename(caseName);
@@ -132,18 +136,21 @@ async function runDownloadJob({
     text: "..."
   });
 
-  await ensureOffscreenDocument();
+  if (buildsPdf) {
 
-  const resetResponse =
-    await sendToOffscreen({
-      type: "RESET"
-    });
+    await ensureOffscreenDocument();
 
-  if (!resetResponse?.ok) {
-    throw new Error(
-      resetResponse?.error ||
-      "Could not initialize PDF builder."
-    );
+    const resetResponse =
+      await sendToOffscreen({
+        type: "RESET"
+      });
+
+    if (!resetResponse?.ok) {
+      throw new Error(
+        resetResponse?.error ||
+        "Could not initialize PDF builder."
+      );
+    }
   }
 
   const crxApp =
@@ -319,84 +326,56 @@ async function runDownloadJob({
           );
         }
 
-        /*
-         * The image has already been downloaded normally
-         * by Ancestry. Now fetch the same image into our
-         * offscreen document so it can be added to the PDF.
-         */
-        const addResponse =
-          await sendToOffscreen({
-            type: "ADD_IMAGE",
-            pageNumber: imageNumber,
-            filename:
-              finishedDownload.filename,
-            url: imageUrl
-          });
+        if (buildsPdf) {
 
-        if (!addResponse?.ok) {
-          throw new Error(
-            addResponse?.error ||
-            `Could not add image ${imageNumber} ` +
-            `to the PDF.`
+          /*
+           * The image has already been downloaded normally
+           * by Ancestry. Now fetch the same image into our
+           * offscreen document so it can be added to the PDF.
+           */
+          const addResponse =
+            await sendToOffscreen({
+              type: "ADD_IMAGE",
+              pageNumber: imageNumber,
+              filename:
+                finishedDownload.filename,
+              url: imageUrl
+            });
+
+          if (!addResponse?.ok) {
+            throw new Error(
+              addResponse?.error ||
+              `Could not add image ${imageNumber} ` +
+              `to the PDF.`
+            );
+          }
+
+          console.log(
+            `Added image ${imageNumber} to PDF.`
           );
         }
 
-        console.log(
-          `Added image ${imageNumber} to PDF.`
-        );
-        
-
-
       /*
-       * Normally Ancestry's own Save button will already
-       * create a regular Chrome download.
-       *
-       * If Chrome reports that download, wait for it.
-       * Otherwise save our captured copy explicitly.
+       * "combine" mode only wants the final PDF, not the
+       * individual JPGs Ancestry's Save button just wrote
+       * to disk in order for us to discover the image URL.
+       * Now that the image is embedded in the PDF, delete
+       * that JPG (its entry stays in Chrome's download
+       * history).
        */
-      if (chromeDownload) {
+      if (mode === "combine") {
 
-        await waitForChromeDownloadComplete(
-          chromeDownload.id,
-          120000
-        );
-
-        await sendToOffscreen({
-          type: "REVOKE_URL",
-          url: addResponse.blobUrl
-        });
-
-      } else {
-
-        console.warn(
-          "Chrome did not report a normal download; " +
-          "saving a fallback copy."
-        );
-
-        const padded =
-          String(imageNumber).padStart(4, "0");
-
-        const fallbackFilename =
-          `Ancestry Pages/${safeCaseName}/` +
-          `${padded}.${addResponse.extension}`;
-
-        const fallbackDownloadId =
-          await chrome.downloads.download({
-            url: addResponse.blobUrl,
-            filename: fallbackFilename,
-            saveAs: false,
-            conflictAction: "overwrite"
-          });
-
-        await waitForChromeDownloadComplete(
-          fallbackDownloadId,
-          120000
-        );
-
-        await sendToOffscreen({
-          type: "REVOKE_URL",
-          url: addResponse.blobUrl
-        });
+        try {
+          await chrome.downloads.removeFile(
+            chromeDownload.id
+          );
+        } catch (error) {
+          console.warn(
+            `Could not remove intermediate JPG for ` +
+            `image ${imageNumber}:`,
+            error
+          );
+        }
       }
 
       console.log(
@@ -429,53 +408,58 @@ async function runDownloadJob({
       );
     }
 
-    /*
-     * Build the final PDF.
-     */
-    await setStatus({
-      state: "running",
-      start: startPage,
-      end: endPage,
-      current: endPage,
-      message: "Building PDF..."
-    });
+    let pdfName;
 
-    await chrome.action.setBadgeText({
-      text: "PDF"
-    });
+    if (buildsPdf) {
 
-    const finalResponse =
-      await sendToOffscreen({
-        type: "FINALIZE"
+      /*
+       * Build the final PDF.
+       */
+      await setStatus({
+        state: "running",
+        start: startPage,
+        end: endPage,
+        current: endPage,
+        message: "Building PDF..."
       });
 
-    if (!finalResponse?.ok) {
-      throw new Error(
-        finalResponse?.error ||
-        "Could not create the PDF."
+      await chrome.action.setBadgeText({
+        text: "PDF"
+      });
+
+      const finalResponse =
+        await sendToOffscreen({
+          type: "FINALIZE"
+        });
+
+      if (!finalResponse?.ok) {
+        throw new Error(
+          finalResponse?.error ||
+          "Could not create the PDF."
+        );
+      }
+
+      pdfName =
+        `${safeCaseName}_${startPage}-${endPage}.pdf`;
+
+      const pdfDownloadId =
+        await chrome.downloads.download({
+          url: finalResponse.blobUrl,
+          filename: pdfName,
+          saveAs: false,
+          conflictAction: "overwrite"
+        });
+
+      await waitForChromeDownloadComplete(
+        pdfDownloadId,
+        180000
       );
-    }
 
-    const pdfName =
-      `${safeCaseName}_${startPage}-${endPage}.pdf`;
-
-    const pdfDownloadId =
-      await chrome.downloads.download({
-        url: finalResponse.blobUrl,
-        filename: pdfName,
-        saveAs: false,
-        conflictAction: "overwrite"
+      await sendToOffscreen({
+        type: "REVOKE_URL",
+        url: finalResponse.blobUrl
       });
-
-    await waitForChromeDownloadComplete(
-      pdfDownloadId,
-      180000
-    );
-
-    await sendToOffscreen({
-      type: "REVOKE_URL",
-      url: finalResponse.blobUrl
-    });
+    }
 
     await setStatus({
       state: "done",
@@ -490,7 +474,9 @@ async function runDownloadJob({
     });
 
     console.log(
-      `Done: ${pdfName}`
+      pdfName ?
+        `Done: ${pdfName}` :
+        `Done: images ${startPage}-${endPage}`
     );
 
   } finally {

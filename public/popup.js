@@ -1,8 +1,10 @@
 const currentEl = document.getElementById("current");
 const caseNameEl = document.getElementById("caseName");
 const endPageEl = document.getElementById("endPage");
-const startButton = document.getElementById("start");
 const statusEl = document.getElementById("status");
+const separate = document.getElementById("separate");
+const separateNcombine = document.getElementById("separateNcombine");
+const combine = document.getElementById("combine");
 
 let activeTabId = null;
 let startPage = null;
@@ -68,7 +70,7 @@ async function refreshStatus() {
     ancestryJob.state === "running" ||
     ancestryJob.state === "starting"
   ) {
-    startButton.disabled = true;
+    setButtonsDisabled(true);
 
     if (ancestryJob.current) {
       statusEl.className = "";
@@ -84,18 +86,25 @@ async function refreshStatus() {
 
   if (ancestryJob.state === "done") {
     statusEl.className = "success";
-    statusEl.textContent =
-      `Finished. Created ${ancestryJob.pdfName}`;
+    statusEl.textContent = ancestryJob.pdfName
+      ? `Finished. Created ${ancestryJob.pdfName}`
+      : `Finished downloading images ${ancestryJob.start}-${ancestryJob.end}.`;
     return;
   }
 
   if (ancestryJob.state === "error") {
-    startButton.disabled = false;
+    setButtonsDisabled(false);
     showError(ancestryJob.message);
   }
 }
 
-startButton.addEventListener("click", async () => {
+function setButtonsDisabled(disabled) {
+  separate.disabled = disabled;
+  combine.disabled = disabled;
+  separateNcombine.disabled = disabled;
+}
+
+async function startJob(mode) {
   try {
     const endPage = Number(endPageEl.value);
     const caseName =
@@ -111,7 +120,7 @@ startButton.addEventListener("click", async () => {
       );
     }
 
-    startButton.disabled = true;
+    setButtonsDisabled(true);
     statusEl.className = "";
     statusEl.textContent = "Starting download...";
 
@@ -120,7 +129,8 @@ startButton.addEventListener("click", async () => {
       type: "START_JOB",
       tabId: activeTabId,
       endPage,
-      caseName
+      caseName,
+      mode
     });
 
     if (!response?.ok) {
@@ -130,10 +140,14 @@ startButton.addEventListener("click", async () => {
     }
 
   } catch (error) {
-    startButton.disabled = false;
+    setButtonsDisabled(false);
     showError(error.message);
   }
-});
+}
+
+separate.addEventListener("click", () => startJob("separate"));
+combine.addEventListener("click", () => startJob("combine"));
+separateNcombine.addEventListener("click", () => startJob("both"));
 
 readCurrentPage();
 refreshStatus();
