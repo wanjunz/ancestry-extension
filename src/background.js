@@ -1,8 +1,36 @@
+/*
+ * Architecture:
+ *   popup.js (UI) --STARTJOB/READPAGE--> background.js (this file,
+ *   the service worker) --drives the page via playwright-crx-->
+ *   Ancestry's tab, and --RESET/ADDIMAGE/FINALIZE--> offscreen.js.
+ *
+ *   The offscreen document exists because MV3 service workers have
+ *   no DOM, so they can't build a PDF (pdf-lib) or create Blob URLs
+ *   themselves. chrome.offscreen gives us a DOM-capable context to
+ *   do that work in.
+ *
+ *   `mode` controls what a job actually produces:
+ *     "separate" - download each image as a JPG only, no PDF.
+ *     "combine"  - produce only the combined PDF.
+ *     "both"     - the original behavior: JPGs and the PDF.
+ *
+ *   Every mode discovers an image's URL the same way: by clicking
+ *   Ancestry's own Save UI and observing the resulting native
+ *   Chrome download (there is no simpler API to fetch the image
+ *   directly). That's why "combine" still triggers a real per-image
+ *   download - it then deletes the JPG once it's embedded in the
+ *   PDF, since there's no way to get the URL without it.
+ */
 import {
   crx,
   expect
 } from "playwright-crx/test";
 
+/*
+ * Only one Playwright session/offscreen document can usefully run
+ * at a time, so this simple flag is enough to reject a second
+ * START_JOB while one is already in flight.
+ */
 let jobRunning = false;
 
 chrome.runtime.onMessage.addListener(
@@ -28,6 +56,7 @@ chrome.runtime.onMessage.addListener(
           });
         });
 
+      // Keep the message channel open for the async sendResponse above.
       return true;
     }
 
@@ -44,6 +73,13 @@ chrome.runtime.onMessage.addListener(
 
       jobRunning = true;
 
+      /*
+       * Acknowledge immediately that the job started - the popup
+       * doesn't wait on this message for progress/completion. It
+       * instead polls chrome.storage.local (see setStatus) and the
+       * badge text, since the job can run far longer than a single
+       * message round-trip should be held open for.
+       */
       sendResponse({
         ok: true
       });
@@ -104,6 +140,11 @@ async function readPageNumber(tabId) {
 
   } finally {
 
+    /*
+     * Unconditional cleanup: if inputValue() above threw (e.g. the
+     * page navigated away), we still want to detach/close rather
+     * than leak this Playwright session.
+     */
     if (page) {
       try {
         await crxApp.detach(page);
@@ -123,6 +164,8 @@ async function runDownloadJob({
   mode
 }) {
 
+  // See the mode summary at the top of this file: only "separate"
+  // skips the offscreen document and the PDF entirely.
   const buildsPdf = mode !== "separate";
 
   const safeCaseName =
@@ -294,6 +337,12 @@ async function runDownloadJob({
         /*
          * Re-query Chrome now that the download is done.
          * This gives us the final URL after redirects.
+         *
+         * This is the only way this code has to learn the image's
+         * fetchable URL - Ancestry doesn't expose it any other way
+         * we could find (e.g. as a plain <img src>). That's why
+         * even "combine" mode, which doesn't want to keep the JPG,
+         * still has to go through a real download to discover it.
          */
         const finishedDownloads =
           await chrome.downloads.search({
@@ -359,9 +408,15 @@ async function runDownloadJob({
        * "combine" mode only wants the final PDF, not the
        * individual JPGs Ancestry's Save button just wrote
        * to disk in order for us to discover the image URL.
-       * Now that the image is embedded in the PDF, delete
-       * that JPG (its entry stays in Chrome's download
-       * history).
+       * Now that the image is embedded in the PDF, delete that
+       * JPG from disk - there's no way to avoid the download
+       * happening in the first place (see the comment above),
+       * only to clean it up afterward.
+       *
+       * The entry deliberately stays in Chrome's download
+       * history (not erased) so it's easy to check afterward
+       * which images were actually downloaded/skipped if
+       * something goes wrong.
        */
       if (mode === "combine") {
 
@@ -499,7 +554,10 @@ async function runDownloadJob({
     }
 
     /*
-     * Closing the offscreen document releases its memory.
+     * Closing the offscreen document releases its in-memory
+     * pdfDoc. Always attempted, even in "separate" mode where
+     * one was never opened - closeDocument() just throws (caught
+     * below) if there's nothing to close.
      */
     try {
       await chrome.offscreen.closeDocument();
@@ -516,6 +574,8 @@ async function ensureOffscreenDocument() {
       "offscreen.html"
     );
 
+  // Chrome allows only one offscreen document per extension at a
+  // time; calling createDocument() while one already exists throws.
   const contexts =
     await chrome.runtime.getContexts({
       contextTypes: [
@@ -680,6 +740,7 @@ function sanitizeFilename(value) {
   const cleaned =
     String(value || "Ancestry Case")
       .trim()
+      // Strip characters illegal in filenames on Windows/macOS.
       .replace(
         /[<>:"/\\|?*\x00-\x1F]/g,
         "-"
