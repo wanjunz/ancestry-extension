@@ -19298,4 +19298,3 @@ function revokeAllUrls() {
   }
   objectUrls.clear();
 }
-//# sourceMappingURL=offscreen.js.map

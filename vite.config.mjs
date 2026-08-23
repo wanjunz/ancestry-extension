@@ -12,7 +12,7 @@ const __dirname =
 export default defineConfig({
   build: {
     minify: false,
-    sourcemap: true,
+    sourcemap: false,
 
     rollupOptions: {
       plugins: [

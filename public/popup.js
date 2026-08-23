@@ -215,11 +215,45 @@ async function stopJob() {
     type: "STOP_JOB"
   });
 
-  if (!response?.ok) {
-    showError(
-      response?.error || "Could not communicate within extension components."
-    );
+  if (response?.ok) {
+    return;
   }
+
+  const { ancestryJob } =
+    await chrome.storage.local.get("ancestryJob");
+
+  if (
+    ancestryJob &&
+    (ancestryJob.state === "running" || ancestryJob.state === "starting")
+  ) {
+    /*
+     * Background says no job is running, but storage still says one is:
+     * the background process died mid-job (e.g. the MV3 service worker
+     * got suspended) without ever writing a terminal status. Reconcile
+     * storage ourselves so the UI doesn't stay stuck showing stale
+     * progress forever.
+     */
+    await chrome.storage.local.set({
+      ancestryJob: {
+        ...ancestryJob,
+        state: "error",
+        message:
+          "The download stopped responding partway through (the browser likely " +
+          "suspended the extension in the background). Any images already fully " +
+          "downloaded and saved to disk should still be there, but no PDF was " +
+          "produced for this run. You can start a new download."
+      }
+    });
+
+    jobActive = false;
+    applyButtonState();
+    refreshStatus();
+    return;
+  }
+
+  showError(
+    response?.error || "Could not communicate within extension components."
+  );
 }
 
 separate.addEventListener("click", () => startJob("separate"));

@@ -233400,4 +233400,3 @@ async function setStatus(status) {
     ancestryJob: status
   });
 }
-//# sourceMappingURL=background.js.map
