@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Ancestry Case Downloader",
+  "name": "Ancestry.com File Downloader",
   "version": "0.1.0",
   "description": "Download a selected range of Ancestry case-file images.",
   "permissions": [
@@ -9,11 +9,17 @@
     "downloads"
   ],
   "action": {
-    "default_title": "Ancestry Case Downloader",
+    "default_title": "Ancestry File Downloader",
     "default_popup": "popup.html"
   },
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "icons": {
+    "16": "logo.png",
+    "32": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
   }
 }

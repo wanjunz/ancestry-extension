@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Ancestry Case Downloader",
+  "name": "Ancestry File Downloader",
   "version": "0.3.0",
-  "description": "Download a range of Ancestry case-file images and combine them into a PDF.",
+  "description": "Automatically download a range of Ancestry.com file images. Options include separate JPGs for each image or a PDF with all images.",
   "minimum_chrome_version": "118",
 
   "permissions": [
@@ -23,7 +23,10 @@
   },
 
   "action": {
-    "default_title": "Ancestry Case Downloader",
+    "default_title": "Ancestry File Downloader",
     "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "logo.png"
   }
 }
