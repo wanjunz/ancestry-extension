@@ -76,8 +76,12 @@
       margin: 4px 0;
       color: #fff;
     }
-    .startButton:hover {
+    .startButton:hover:not(:disabled) {
       background-color: #82892D;
+    }
+    .startButton:disabled {
+      background-color: #9E9E9E;
+      cursor: default;
     }
 
     .stopButton {

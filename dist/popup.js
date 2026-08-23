@@ -9,6 +9,8 @@ const stop = document.getElementById("stop");
 
 let activeTabId = null;
 let startPage = null;
+let pageReady = false;
+let jobActive = false;
 
 function showError(message) {
   statusEl.className = "error";
@@ -48,13 +50,15 @@ async function readCurrentPage() {
 
     currentEl.textContent = startPage;
     endPageEl.min = startPage;
-    separate.disabled = false;
-    separateNcombine.disabled = false;
-    combine.disabled = false;
-
+    pageReady = true;
+    applyButtonState();
+    updateReadinessMessage();
 
   } catch (error) {
     currentEl.textContent = "Unavailable";
+    pageReady = false;
+    applyButtonState();
+    updateReadinessMessage();
     showError(error.message);
   }
 }
@@ -67,11 +71,18 @@ async function refreshStatus() {
     return;
   }
 
-  if (
+  jobActive =
     ancestryJob.state === "running" ||
-    ancestryJob.state === "starting"
-  ) {
-    setButtonsDisabled(true);
+    ancestryJob.state === "starting";
+
+  applyButtonState();
+
+  if (ancestryJob.state === "error") {
+    showError(ancestryJob.message);
+    return;
+  }
+
+  if (jobActive) {
 
     if (ancestryJob.current) {
       statusEl.className = "";
@@ -85,8 +96,12 @@ async function refreshStatus() {
     return;
   }
 
+  if (!isReady()) {
+    updateReadinessMessage();
+    return;
+  }
+
   if (ancestryJob.state === "done") {
-    setButtonsDisabled(false);
     statusEl.className = "success";
     statusEl.textContent = ancestryJob.pdfName
       ? `Finished. Created ${ancestryJob.pdfName}`
@@ -95,7 +110,6 @@ async function refreshStatus() {
   }
 
   if (ancestryJob.state === "stopped") {
-    setButtonsDisabled(false);
     statusEl.className = "";
 
     if (ancestryJob.current == null) {
@@ -107,21 +121,57 @@ async function refreshStatus() {
     } else {
       statusEl.textContent = `Stopped by user at page ${ancestryJob.current}.`;
     }
-
-    return;
-  }
-
-  if (ancestryJob.state === "error") {
-    setButtonsDisabled(false);
-    showError(ancestryJob.message);
   }
 }
 
-function setButtonsDisabled(disabled) {
+function isEndPageValid() {
+  const raw = endPageEl.value.trim();
+
+  if (raw === "") {
+    return false;
+  }
+
+  const value = Number(raw);
+
+  return Number.isInteger(value) && value >= startPage;
+}
+
+function isReady() {
+  return pageReady && isEndPageValid();
+}
+
+function setStartButtonsDisabled(disabled) {
   separate.disabled = disabled;
   combine.disabled = disabled;
   separateNcombine.disabled = disabled;
-  stop.disabled = !disabled;
+}
+
+function applyButtonState() {
+  if (jobActive) {
+    setStartButtonsDisabled(true);
+    stop.disabled = false;
+    return;
+  }
+
+  stop.disabled = true;
+  setStartButtonsDisabled(!isReady());
+}
+
+function updateReadinessMessage() {
+  if (jobActive) {
+    return;
+  }
+
+  statusEl.className = "";
+
+  if (!pageReady) {
+    statusEl.textContent =
+      "Please open a file on Ancestry.com that you want to download.";
+  } else if (!isEndPageValid()) {
+    statusEl.textContent = "Please enter a valid last image #.";
+  } else {
+    statusEl.textContent = "";
+  }
 }
 
 async function startJob(mode) {
@@ -130,17 +180,8 @@ async function startJob(mode) {
     const caseName =
       caseNameEl.value.trim() || "Ancestry Case";
 
-    if (!Number.isInteger(endPage)) {
-      throw new Error("Enter a valid last image number.");
-    }
-
-    if (endPage < startPage) {
-      throw new Error(
-        `Last image must be ${startPage} or higher.`
-      );
-    }
-
-    setButtonsDisabled(true);
+    jobActive = true;
+    applyButtonState();
     statusEl.className = "";
     statusEl.textContent = "Starting download...";
 
@@ -160,7 +201,8 @@ async function startJob(mode) {
     }
 
   } catch (error) {
-    setButtonsDisabled(false);
+    jobActive = false;
+    applyButtonState();
     showError(error.message);
   }
 }
@@ -184,6 +226,13 @@ separate.addEventListener("click", () => startJob("separate"));
 combine.addEventListener("click", () => startJob("combine"));
 separateNcombine.addEventListener("click", () => startJob("both"));
 stop.addEventListener("click", () => stopJob());
+endPageEl.addEventListener("input", () => {
+  applyButtonState();
+  updateReadinessMessage();
+});
+
+applyButtonState();
+updateReadinessMessage();
 
 readCurrentPage();
 refreshStatus();

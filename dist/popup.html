@@ -76,8 +76,12 @@
       margin: 4px 0;
       color: #fff;
     }
-    .startButton:hover {
+    .startButton:hover:not(:disabled) {
       background-color: #82892D;
+    }
+    .startButton:disabled {
+      background-color: #9E9E9E;
+      cursor: default;
     }
 
     .stopButton {
@@ -97,9 +101,7 @@
 </head>
 
 <body>
-  <h2>Ancestry Case Downloader</h2>
-
-  
+  <h2>Ancestry File Downloader</h2>
 
   <div class="field">
     <label for="caseName">File name</label>
@@ -112,12 +114,12 @@
 
   <div class="fieldRow">
     <div class="field">
-      <label for="current">Starting page</label>
+      <label for="current">Start image #</label>
       <span id="current">Reading...</span>
     </div>
 
     <div class="field">
-      <label for="endPage">Last page #</label>
+      <label for="endPage">Last image #</label>
       <input
         id="endPage"
         type="number"
